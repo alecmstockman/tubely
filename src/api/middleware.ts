@@ -14,7 +14,7 @@ export function withConfig(cfg: ApiConfig, handler: HandlerWithConfig) {
   return (req: BunRequest) => handler(cfg, req);
 }
 
-export function cacheMiddleware(
+export function noCacheMiddleware(
   next: (req: Request) => Response | Promise<Response>,
 ): (req: Request) => Promise<Response> {
   return async function (req: Request): Promise<Response> {
@@ -25,7 +25,9 @@ export function cacheMiddleware(
     return new Response(res.body, {
       status: res.status,
       statusText: res.statusText,
-      headers,
+      headers: {
+        "Cache-Control": "no-store",
+      },
     });
   };
 }
