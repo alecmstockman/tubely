@@ -6,6 +6,7 @@ import type { BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 import path from "path";
 import { mediaTypeToExt, getAssetDiskPath, getAssetURL } from "./assets";
+import { randomBytes } from "crypto";
 
 
 export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
@@ -16,8 +17,8 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
 
   const token = getBearerToken(req.headers);
   const userId = validateJWT(token, cfg.jwtSecret);
-
   const video = getVideo(cfg.db, videoId);
+
   if (!video) {
     throw new BadRequestError("Unable to retrieve video")
   }
@@ -47,8 +48,11 @@ export async function handlerUploadThumbnail(cfg: ApiConfig, req: BunRequest) {
     throw new BadRequestError("mediaType not instance of jpeg or png");
   }
 
+  const rand = randomBytes(32);
+  const randomString = rand.toString("base64url");
+
   const ext = mediaTypeToExt(mediaType);
-  const filename = `${videoId}${ext}`
+  const filename = `${randomString}${ext}`;
 
   const assetDiskPath = getAssetDiskPath(cfg, filename)
   await Bun.write(assetDiskPath, file)
