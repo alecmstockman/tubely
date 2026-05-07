@@ -4,6 +4,7 @@ import { type ApiConfig } from "../config";
 import { s3, S3Client, type BunRequest } from "bun";
 import { BadRequestError, NotFoundError, UserForbiddenError } from "./errors";
 import { getVideo, updateVideo } from "../db/videos";
+import { type Video } from "../db/videos"
 import { randomBytes, randomUUID } from "crypto";
 import { getAssetDiskPath, mediaTypeToExt } from "./assets";
 import { tmpdir } from "os";
@@ -24,14 +25,16 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
 
   const token = getBearerToken(req.headers);
   const userId = validateJWT(token, cfg.jwtSecret);
-  const video = getVideo(cfg.db, videoId);
+  const dbVideo = getVideo(cfg.db, videoId);
 
-  if (!video) {
+  if (!dbVideo) {
     throw new BadRequestError("Unable to retrieve video")
   }
-  if (video?.userID !== userId) {
+  if (dbVideo?.userID !== userId) {
     throw new UserForbiddenError("Access to video denied");
   }
+
+  console.log("VIDEO TITLE:", dbVideo.title)
 
   const formData = await req.formData();
   const file = formData.get("video")
@@ -73,22 +76,26 @@ export async function handlerUploadVideo(cfg: ApiConfig, req: BunRequest) {
 
     const rand = randomBytes(32);
     const randomString = rand.toString("hex")
-    const filename = `${aspectRatio}/${randomString}${ext}`;
+    // const filename = `${aspectRatio}/${randomString}${ext}`;
+    const filename = `${aspectRatio}/${ext}`;
     console.log("filename", filename)
     
     const s3File = cfg.s3Client.file(filename);
     await s3File.write(Bun.file(processedFilename), { type: mediaType});
 
-    const videoURL = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${filename}`;
-    video.videoURL = videoURL;
-
-    updateVideo(cfg.db, video);
+    // const videoURL = `https://${cfg.s3Bucket}.s3.${cfg.s3Region}.amazonaws.com/${filename}`;
+    // video.videoURL = videoURL;
+    dbVideo.videoURL = filename
+    console.log("\n\nVIDEO URL:", dbVideo.videoURL)
+    updateVideo(cfg.db, dbVideo);
+    const video = await dbVideoToSignedVideo(cfg, dbVideo);
+    return respondWithJSON(200, video);
 
   } finally {
     await unlink(tempPath);
   }
   
-  return respondWithJSON(200, null);
+  
 }
 
 export async function getVideoAspectRatio(filepath: string) {
@@ -158,6 +165,26 @@ export async function processVideoForFastStart(filepath: string) {
   }
 
   return output;
+}
+
+export async function generatePresignedURL(cfg: ApiConfig, key: string, expireTime: number): Promise<string> {
+  const presignedURL = await cfg.s3Client.presign(key, {expiresIn: expireTime})
+  return presignedURL;
+}
+
+export async function dbVideoToSignedVideo(cfg: ApiConfig, video: Video): Promise<Video> {
+
+  const url = video.videoURL;
+
+  if (!url) {
+    // throw new NotFoundError("video missing url")
+    return video;
+  }
+
+  const presignedURL = await generatePresignedURL(cfg, url, 300)
+  video.videoURL = presignedURL;
+
+  return {...video, videoURL: presignedURL};
 }
 
 
